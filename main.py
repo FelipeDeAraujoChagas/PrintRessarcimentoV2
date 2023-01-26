@@ -69,6 +69,7 @@ class Telas:
     def telaRotina(self):
 
         self.frameTela()
+
         img_botao1 = PhotoImage(file="imagem\\bt_upload.png")
 
         self.fr_tela2 = Frame(self.master, borderwidth=1, relief='sunken', background='#D9D9D9')
@@ -140,15 +141,18 @@ class PegarPrint:
         site = "http://intranet.suanova.com/transportes/ressarcimento/SitePages/Consultar%20Instancia_v2.aspx"
         self.nome_pasta_guadar = r'\\nas01.via.varejo.corp\gremio01\TRANSPORTE\FINANCEIRO\Clécia Lucena\DEMANDA SEQUOIA\ARQUIVOS'
 
+        #p: Playwright
+
         with sync_playwright() as p:
 
             try:
-                browser = p.chromium.launch(headless=False,
-                                        executable_path=r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")
-            except:
+                browser = p.chromium.launch(headless=False, executable_path=r"chrome-win\chrome.exe")
 
-                browser = p.chromium.launch(headless=False,
-                                            executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+            except Exception as e:
+
+                msg = str(e)
+                messagebox.showinfo("informação", msg)
+
 
             self.page = browser.new_page()
             self.page.goto(site)
@@ -161,9 +165,11 @@ class PegarPrint:
     def rodarloop(self):
 
         try:
+
             ttal = int(len(self.list_df["Pedido"]))
             for key, pedido in enumerate(self.list_df["Pedido"]):
 
+                print(pedido)
                 porcento = ((key + 1)/ttal) * 100
                 self.pd["value"] = key + 1
                 self.lb_informa['text'] = f'{key + 1}/{ttal}   {porcento:.2f} %'
@@ -179,7 +185,6 @@ class PegarPrint:
                 self.checar_instancia_pedido()
                 self.preencher_excel()
 
-            self.app.destroy()
             self.page.close()
             messagebox.showinfo("Fim", "Processo encerrado")
 
@@ -253,68 +258,60 @@ class PegarPrint:
 
     def checar_aquivos(self):
 
-        for c in range(0, 10):
-            path = f'//html/body/form/div[5]/div/div[1]/div[5]/div/table/tbody/tr[1]/td/table/tbody/tr/td/table/tbody/tr/td/div/div/table/tbody/tr[{c}]/td/table/tbody/tr'
-            n = self.frame.locator(path)
-            # print(n.count())
-            if n.count() > 20:
-                for c in range(0, n.count()):
-                    linha = path + f"[{c+1}]"
-                    linha_com_download = self.frame.locator(linha)
-                    # print(linha_com_download.inner_text().strip())
-                    if "Anexos Nova Pontocom" in linha_com_download.inner_text():
-                        local_arquivo = linha + '/td[2]'
-                        self.anex_ponto = self.frame.locator(local_arquivo)
+        try:
 
-                        self.conferir_numero_arquivos()
-                        break
-                break
+            self.retorno_download = "Sem arquivos baixados"
+            self.anex_ponto = self.frame.locator("table#ctl00_ctl21_g_037ceea0_2087_4341_90d6_ea37224bab53_ctl00_gdvFiles")
+            self.conferir_numero_arquivos()
+            self.preencher_excel()
+
+        except:
+
+            self.retorno_download = "Não foram encontrados arquivos para baixar"
 
     def conferir_numero_arquivos(self):
 
-        n = self.anex_ponto.inner_html().count('intranet.suanova')
-        ver = self.anex_ponto.inner_text().rstrip()
+        n = self.anex_ponto.inner_html(timeout=3000).count('intranet.suanova')
 
-        posicao_inicial = 0
+        self.nome_arquivo_anterior = ""
+        for c in range(0, n):
 
-        if n == 0:
+            clik = f"xpath = //*[@id='ctl00_ctl21_g_037ceea0_2087_4341_90d6_ea37224bab53_ctl00_gdvFiles']/tbody/tr[{c + 1}]/td[2]/a"
+            elemento = self.frame.locator(f"{clik}")
+            print(f"arq anterior = {self.nome_arquivo_anterior}", f"arquivo = {elemento.inner_text()}")
+            if str(self.nome_arquivo_anterior.strip()) != str(elemento.inner_text().strip()) and str(elemento.inner_text().strip()) != "":
+                self.nome_arquivo_anterior = elemento.inner_text().strip()
+                self.fazer_download_arquivo(clik)
 
-            self.retorno_download = "nenhum download encontrado"
-
-        else:
+        if self.retorno_download != "Exitem Download que não foram baixados":
 
             self.retorno_download = "Todos Download daixados"
 
-            for c in range(0, n):
-
-                posicao_final = ver.find('\n', posicao_inicial)
-                if posicao_final > 0:
-                    nome_arq = ver[posicao_inicial:posicao_final]
-                else:
-                    nome_arq = ver[posicao_inicial:]
-
-                #print(nome_arq.strip())
-                arquivo = nome_arq.strip()
-                self.fazer_download_arquivo(str(arquivo))
-                posicao_inicial = posicao_final + 1
-
-    def fazer_download_arquivo(self, nome_arq):
+    def fazer_download_arquivo(self, clik):
 
         try:
 
             with self.page.expect_download() as download_info:
-                # Perform the action that initiates download
-                self.frame.locator(f"text = {nome_arq}").click()
+                self.frame.locator(f"{clik}").click()
 
             download = download_info.value
-            path = f"{self.nome_pasta_guadar}\\{self.pasta}\\{nome_arq}"
+            nome_arq_baixado = self.tratar_nome_arq(self.frame.locator(f"{clik}").inner_text())
+            path = f"{self.nome_pasta_guadar}\\{self.pasta}\\{nome_arq_baixado}"
             download.save_as(path)
             self.page.wait_for_timeout(500)
 
         except:
 
-            self.retorno_download = "Download que não foram baixados"
+            self.retorno_download = "Exitem Download que não foram baixados"
 
+    def tratar_nome_arq(self, text):
+
+        arq = str(text).strip()
+        arq = arq.replace("/", "-")
+        arq = arq.replace("\\", "-")
+        arq = arq.replace(":", "-")
+        print(arq)
+        return arq
 
     def tirar_prints(self, tela):
 
@@ -340,11 +337,7 @@ class PegarPrint:
 
         botaoPesquisar = self.page.locator('xpath = //*[@id="ctl00_ctl21_g_ba3a473a_1336_4e1e_adcb_5ef3fc254e67_ctl00_ibtConfirmarPesquisarInstancias"]')
         botaoPesquisar.click()
-
-        while True:
-            if self.page.locator(f"text = CNPJ da Transportadora ").is_visible():
-                break
-
+        self.page.locator(f"text = CNPJ da Transportadora ").is_disabled()
 
     def abrir_informacao(self, sequencial):
 
@@ -352,11 +345,8 @@ class PegarPrint:
            f"xpath = //html/body/form/div[5]/div/div[1]/div[5]/div/div/div[4]/div/div/table/tbody/tr/td/div/div/div/div/div/div/div[2]/div/div[1]/table/tbody/tr/td/table/tbody/tr[2]/td/div/div/div/table/tbody/tr[4]/td/table[2]/tbody/tr[2]/td/div/table/tbody/tr[{sequencial}]/td[1]/a")
 
         abrirItem.click()
-
-        while True:
-           entao = self.page.frame_locator("iframe.ms-dlgFrame")
-           if entao.locator("text = Dados de Parcial").is_visible():
-                break
+        entao = self.page.frame_locator("iframe.ms-dlgFrame")
+        entao.locator("text = Dados de Parcial").is_disabled()
 
     def expadir_tela(self):
 
@@ -415,11 +405,11 @@ class PegarPrint:
 
     def salvar_excel(self):
 
-        #sistema = os.environ
-        pasta_downloads =r'\\nas01.via.varejo.corp\gremio01\TRANSPORTE\FINANCEIRO\Clécia Lucena\DEMANDA SEQUOIA\RELATORIOS JA FINALIZADOS'
+
+        pasta_downloads = r'\\nas01.via.varejo.corp\gremio01\TRANSPORTE\FINANCEIRO\Clécia Lucena\DEMANDA SEQUOIA\RELATORIOS JA FINALIZADOS'
         arquivos = os.listdir(pasta_downloads)
-        arq = '\\Retorno print ressarcimento.xlsx'
-        plan = pasta_downloads + arq
+        arq = 'Retorno print ressarcimento.xlsx'
+        plan = pasta_downloads + "\\" + arq
 
         c = 0
         while True:
@@ -429,7 +419,7 @@ class PegarPrint:
                 if n == arq:
                     sair = False
                     arq = f'Retorno print ressarcimento({c}).xlsx'
-                    plan = pasta_downloads + arq
+                    plan = pasta_downloads + "\\" + arq
 
             if sair:
                 break
